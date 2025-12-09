@@ -14,10 +14,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS so frontend can call backend from any origin
+# CORS so frontend can call backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # if you want, later restrict to your frontend URL
+    allow_origins=["*"],  # later you can restrict this
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,34 +29,17 @@ class MCDMRequest(BaseModel):
     criteria_types: List[str]
     method: Literal["topsis", "mairca", "all"] = "all"
     use_merec_weights: bool = True
-    weights: Optional[List[float]] = None  # only used if use_merec_weights = False
-
-
-def sanitize_for_json(obj):
-    """Convert numpy types + NaN/Inf into JSON-safe Python values."""
-    if isinstance(obj, np.ndarray):
-        obj = np.nan_to_num(obj, nan=0.0, posinf=0.0, neginf=0.0)
-        return obj.tolist()
-    if isinstance(obj, (np.floating, float)):
-        v = float(obj)
-        if not np.isfinite(v):
-            return 0.0
-        return v
-    if isinstance(obj, dict):
-        return {k: sanitize_for_json(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [sanitize_for_json(v) for v in obj]
-    return obj
+    weights: Optional[List[float]] = None  # if use_merec_weights = False
 
 
 @app.get("/")
 def root():
-    return {"message": "MCDM backend running. Use /docs for API docs."}
+    return {"message": "MCDM backend running. Go to /docs to test the API."}
 
 
 @app.post("/mcdm/run")
 def run_mcdm(req: MCDMRequest):
-    # Convert decision matrix
+    # ----- 1) Basic validation -----
     X = np.asarray(req.decision_matrix, dtype=float)
     if X.ndim != 2:
         raise HTTPException(status_code=400, detail="decision_matrix must be 2D (m x n)")
@@ -68,7 +51,7 @@ def run_mcdm(req: MCDMRequest):
             detail="criteria_types length must match number of columns in decision_matrix",
         )
 
-    # Decide weights
+    # ----- 2) Weights (MEREC or custom) -----
     if req.use_merec_weights:
         w = merec(X, req.criteria_types)
     else:
@@ -91,21 +74,31 @@ def run_mcdm(req: MCDMRequest):
             )
         w = w / w_sum
 
+    # JSON-safe weights
+    w_safe = np.nan_to_num(w, nan=0.0, posinf=0.0, neginf=0.0)
     response = {
-        "weights_used": w,
+        "weights_used": w_safe.tolist(),
     }
 
-    # TOPSIS
+    # ----- 3) TOPSIS -----
     if req.method in ("topsis", "all"):
         scores, ranking = topsis(X, w, req.criteria_types)
-        response["topsis_scores"] = scores
-        response["topsis_ranking"] = ranking
 
-    # MAIRCA
+        scores_safe = np.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
+        ranking_safe = np.asarray(ranking, dtype=int)
+
+        response["topsis_scores"] = scores_safe.tolist()
+        response["topsis_ranking"] = ranking_safe.tolist()
+
+    # ----- 4) MAIRCA -----
     if req.method in ("mairca", "all"):
         Q, ranking_m = mairca(X, w, req.criteria_types)
-        response["mairca_Q"] = Q
-        response["mairca_ranking"] = ranking_m
 
-    # Make sure everything is JSON-safe
-    return sanitize_for_json(response)
+        Q_safe = np.nan_to_num(Q, nan=0.0, posinf=0.0, neginf=0.0)
+        ranking_m_safe = np.asarray(ranking_m, dtype=int)
+
+        response["mairca_Q"] = Q_safe.tolist()
+        response["mairca_ranking"] = ranking_m_safe.tolist()
+
+    # ----- 5) Return pure Python types (no numpy, no NaN/Inf) -----
+    return response
