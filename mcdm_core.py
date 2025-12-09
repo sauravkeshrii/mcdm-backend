@@ -28,11 +28,12 @@ def _parse_criteria_types(criteria_types):
                 raise ValueError(f"Unknown criteria type numeric: {ct!r}")
         else:
             raise TypeError(f"Unsupported criteria type: {type(ct)}")
+
     return np.array(parsed, dtype=object)
 
 
 # ---------------------------------------------------------------------
-# MEREC – criteria weights (Section 3 in the paper) 
+# MEREC – criteria weights (Section 3 in the paper)
 # ---------------------------------------------------------------------
 def merec(decision_matrix, criteria_types):
     """
@@ -57,14 +58,17 @@ def merec(decision_matrix, criteria_types):
 
     c_types = _parse_criteria_types(criteria_types)
     if len(c_types) != n:
-        raise ValueError("criteria_types length must match number of columns in decision_matrix")
+        raise ValueError(
+            "criteria_types length must match number of columns in decision_matrix"
+        )
 
-    # Step 2: normalized matrix h_ij using Eqs. (25) and (26) 
+    # Step 2: normalized matrix h_ij using Eqs. (25) and (26)
     hij = np.zeros_like(X, dtype=float)
     for j in range(n):
         col = X[:, j]
         col_min = col.min()
         col_max = col.max()
+
         if col_max == col_min:
             # All values equal => no information; set hij = 1 for all alts
             hij[:, j] = 1.0
@@ -82,12 +86,12 @@ def merec(decision_matrix, criteria_types):
     hij_safe = np.clip(hij, eps, None)
     log_hij = np.log(hij_safe)
 
-    # Step 3: performance of alternatives S_i – Eq. (27) 
+    # Step 3: performance of alternatives S_i – Eq. (27)
     # S_i = ln( 1 + (1/n) * Σ_j |ln(h_ij)| )
     base = np.abs(log_hij)
     Si = np.log(1.0 + (base.sum(axis=1) / n))
 
-    # Step 4: performance with criterion j removed, S'_ij – Eq. (28) 
+    # Step 4: performance with criterion j removed, S'_ij – Eq. (28)
     S_prime = np.zeros((m, n), dtype=float)
     for j in range(n):
         mask = np.ones(n, dtype=bool)
@@ -96,23 +100,25 @@ def merec(decision_matrix, criteria_types):
             # Only one criterion; if removed, no info
             S_prime[:, j] = 0.0
             continue
+
         sub = base[:, mask]
         S_prime[:, j] = np.log(1.0 + (sub.sum(axis=1) / mask.sum()))
 
-    # Step 5: removal effect of j-th criterion E_j – Eq. (29) 
+    # Step 5: removal effect of j-th criterion E_j – Eq. (29)
     E = np.abs(S_prime - Si[:, None]).sum(axis=0)
 
-    # Step 6: normalize to get weights – Eq. (30) 
+    # Step 6: normalize to get weights – Eq. (30)
     E_sum = E.sum()
     if E_sum == 0:
         # No discriminatory power; assign equal weights
         return np.full(n, 1.0 / n)
+
     weights = E / E_sum
     return weights
 
 
 # ---------------------------------------------------------------------
-# TOPSIS – ranking (Section 2.2 in the paper) 
+# TOPSIS – ranking (Section 2.2 in the paper)
 # ---------------------------------------------------------------------
 def topsis(decision_matrix, weights, criteria_types):
     """
@@ -146,17 +152,19 @@ def topsis(decision_matrix, weights, criteria_types):
 
     c_types = _parse_criteria_types(criteria_types)
     if len(c_types) != n:
-        raise ValueError("criteria_types length must match number of columns in decision_matrix")
+        raise ValueError(
+            "criteria_types length must match number of columns in decision_matrix"
+        )
 
-    # Step 2: vector normalization – Eq. (12) 
+    # Step 2: vector normalization – Eq. (12)
     denom = np.linalg.norm(X, axis=0)
     denom[denom == 0] = 1.0  # avoid division by zero
     R = X / denom
 
-    # Step 3: weighted normalized matrix – Eq. (13) 
+    # Step 3: weighted normalized matrix – Eq. (13)
     V = R * w  # broadcasting
 
-    # Step 4: ideal best & worst – Eqs. (14), (15) 
+    # Step 4: ideal best & worst – Eqs. (14), (15)
     ideal_best = np.zeros(n, dtype=float)
     ideal_worst = np.zeros(n, dtype=float)
     for j in range(n):
@@ -168,11 +176,11 @@ def topsis(decision_matrix, weights, criteria_types):
             ideal_best[j] = col.min()
             ideal_worst[j] = col.max()
 
-    # Step 5: distances to ideal best & worst – Eqs. (16), (17) 
+    # Step 5: distances to ideal best & worst – Eqs. (16), (17)
     D_plus = np.sqrt(((V - ideal_best) ** 2).sum(axis=1))
     D_minus = np.sqrt(((V - ideal_worst) ** 2).sum(axis=1))
 
-    # Step 6: closeness coefficient – Eq. (18) 
+    # Step 6: closeness coefficient – Eq. (18)
     denom_dm = D_plus + D_minus
     denom_dm[denom_dm == 0] = 1.0
     scores = D_minus / denom_dm  # higher is better
@@ -182,7 +190,7 @@ def topsis(decision_matrix, weights, criteria_types):
 
 
 # ---------------------------------------------------------------------
-# MAIRCA – ranking (Section 2.3 in the paper) 
+# MAIRCA – ranking (Section 2.3 in the paper)
 # ---------------------------------------------------------------------
 def mairca(decision_matrix, weights, criteria_types):
     """
@@ -216,22 +224,25 @@ def mairca(decision_matrix, weights, criteria_types):
 
     c_types = _parse_criteria_types(criteria_types)
     if len(c_types) != n:
-        raise ValueError("criteria_types length must match number of columns in decision_matrix")
+        raise ValueError(
+            "criteria_types length must match number of columns in decision_matrix"
+        )
 
-    # Step 2: equal preference for alternatives – Eq. (19) 
+    # Step 2: equal preference for alternatives – Eq. (19)
     PA = 1.0 / m
 
-    # Step 3: theoretical rating matrix t_pij = PA * w_j – Eq. (20) 
+    # Step 3: theoretical rating matrix t_pij = PA * w_j – Eq. (20)
     # tp has shape (n,), then broadcast to (m, n)
     tp = PA * w
     tp_mat = np.tile(tp, (m, 1))
 
-    # Step 4: real rating matrix t_rij – Eqs. (21), (22) 
+    # Step 4: real rating matrix t_rij – Eqs. (21), (22)
     tr = np.zeros_like(X, dtype=float)
     for j in range(n):
         col = X[:, j]
         col_min = col.min()
         col_max = col.max()
+
         if col_max == col_min:
             # No discrimination: factor = 1 (all identical)
             factor = np.ones(m, dtype=float)
@@ -245,10 +256,10 @@ def mairca(decision_matrix, weights, criteria_types):
 
         tr[:, j] = tp[j] * factor
 
-    # Step 5: gap matrix g_ij = t_pij - t_rij – Eq. (23) 
+    # Step 5: gap matrix g_ij = t_pij - t_rij – Eq. (23)
     g = tp_mat - tr
 
-    # Step 6: total gap per alternative Q_i – Eq. (24) 
+    # Step 6: total gap per alternative Q_i – Eq. (24)
     Q = g.sum(axis=1)
 
     # Lower Q is better
